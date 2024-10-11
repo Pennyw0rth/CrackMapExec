@@ -1,14 +1,16 @@
-from impacket.ldap import ldapasn1 as ldapasn1_impacket
-
 def parse_result_attributes(ldap_response):
     parsed_response = []
     for entry in ldap_response:
         # SearchResultReferences may be returned
-        if not isinstance(entry, ldapasn1_impacket.SearchResultEntry):
+        if entry["type"] != "searchResEntry":
             continue
         attribute_map = {}
         for attribute in entry["attributes"]:
-            val = [str(val) for val in attribute["vals"].components]
-            attribute_map[str(attribute["type"])] = val if len(val) > 1 else val[0]
+            if "description" in attribute:
+                attribute_map[str(attribute)] = "" if entry['attributes'][attribute] == [] else str(entry['attributes'][attribute][0])
+            elif "pwdLastSet" in attribute:
+                attribute_map[str(attribute)] = str(entry['attributes'][attribute])
+            else:    
+                attribute_map[str(attribute)] = entry['attributes'][attribute]
         parsed_response.append(attribute_map)
     return parsed_response

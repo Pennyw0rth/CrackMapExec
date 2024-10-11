@@ -98,7 +98,12 @@ def gen_cli_args():
     kerberos_group.add_argument("--use-kcache", action="store_true", help="Use Kerberos authentication from ccache file (KRB5CCNAME)")
     kerberos_group.add_argument("--aesKey", metavar="AESKEY", nargs="+", help="AES key to use for Kerberos Authentication (128 or 256 bits)")
     kerberos_group.add_argument("--kdcHost", metavar="KDCHOST", help="FQDN of the domain controller. If omitted it will use the domain part (FQDN) specified in the target parameter")
-    
+
+    certificate_group = std_parser.add_argument_group("Certificate", "Options for Certificate authentication")
+    certificate_group.add_argument("-pfx", metavar="PFX", action="store", default=None, dest="pfx", help=".pfx file for certificate authentication")
+    certificate_group.add_argument("-key", metavar="KEY", action="store", default=None, dest="key", help=".key file for certificate authentication")
+    certificate_group.add_argument("-cert", metavar="CERT", action="store", default=None, dest="cert", help=".crt file fertificate authentication")
+
     server_group = std_parser.add_argument_group("Servers", "Options for nxc servers")
     server_group.add_argument("--server", choices={"http", "https"}, default="https", help="use the selected server")
     server_group.add_argument("--server-host", type=str, default="0.0.0.0", metavar="HOST", help="IP to bind the server to")

@@ -136,6 +136,9 @@ class connection:
         self.username = ""
         self.kerberos = bool(self.args.kerberos or self.args.use_kcache or self.args.aesKey or (hasattr(self.args, "delegate") and self.args.delegate))
         self.aesKey = None if not self.args.aesKey else self.args.aesKey[0]
+        self.pfx = self.args.pfx
+        self.key = self.args.key
+        self.cert = self.args.cert
         self.use_kcache = None if not self.args.use_kcache else self.args.use_kcache
         self.admin_privs = False
         self.failed_logins = 0
@@ -219,6 +222,9 @@ class connection:
         return
 
     def hash_login(self, domain, username, ntlm_hash):
+        return
+    
+    def schannel_login(self, domain, username="", password="", pfx=None, key=None, cert=None):
         return
 
     def proto_flow(self):
@@ -519,6 +525,20 @@ class connection:
         secret = []
         cred_type = []
         data = []  # Arbitrary data needed for the login, e.g. ssh_key
+
+
+        ## POC, skipping the DB stuff
+        if self.args.pfx:
+            domain = self.args.domain
+            username = self.args.username[0]
+            return self.schannel_login(domain, username, pfx=self.args.pfx, key=None, cert=None)
+        
+
+        if self.args.key and self.args.cert:
+            domain = self.args.domain
+            username = self.args.username[0]
+            return self.schannel_login(domain, username, pfx=None, key=self.args.key, cert=self.args.cert)
+
 
         if self.args.cred_id:
             db_domain, db_username, db_owned, db_secret, db_cred_type, db_data = self.query_db_creds()
