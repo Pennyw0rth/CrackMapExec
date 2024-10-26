@@ -1901,7 +1901,7 @@ class smb(connection):
                 self.logger.fail(e)
             if self.args.ntds == "raw":
                 try:
-                    RawNTDSCopy(logger=self.logger, connection=self.conn,execute=self.execute,host=self.host)
+                    RawNTDSCopy(logger=self.logger, connection=self.conn,execute=self.execute,host=self.host,db=self.db,domain=self.domain,output_filename=self.output_filename)
                 except Exception as e:
                     self.logger.fail(e)
                 return
