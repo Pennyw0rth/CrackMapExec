@@ -164,7 +164,7 @@ class RawNTDSCopy:
             self.logger.fail("Unable to find all needed files")
             return
 
-        self.logger.success("Heads up, hahses on the way ...")
+        self.logger.success("Heads up, hashes on the way...")
         self.dump_ntds()
 
     def dump_ntds(self):
