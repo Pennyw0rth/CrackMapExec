@@ -44,6 +44,7 @@ from nxc.protocols.smb.smbspider import SMBSpider
 from nxc.protocols.smb.passpol import PassPolDump
 from nxc.protocols.smb.samruser import UserSamrDump
 from nxc.protocols.smb.samrfunc import SamrFunc
+from nxc.protocols.smb.raw_ntds_copy import RawNTDSCopy
 from nxc.protocols.ldap.gmsa import MSDS_MANAGEDPASSWORD_BLOB
 from nxc.helpers.logger import highlight
 from nxc.helpers.bloodhound import add_user_bh
@@ -1898,7 +1899,12 @@ class smb(connection):
                 # of enough privileges to access DRSUAPI.
                 #    if resumeFile is not None:
                 self.logger.fail(e)
-
+            if self.args.ntds == "raw":
+                try:
+                    RawNTDSCopy(logger=self.logger, connection=self.conn,execute=self.execute,host=self.host)
+                except Exception as e:
+                    self.logger.fail(e)
+                return
         NTDS = NTDSHashes(
             NTDSFileName,
             self.bootkey,

