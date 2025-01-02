@@ -184,27 +184,24 @@ class ldap(connection):
                 attributes=["defaultNamingContext", "dnsHostName"],
                 sizeLimit=0,
             )
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
-                target = None
-                target_domain = None
-                base_dn = None
-                try:
-                    for attribute in item["attributes"]:
-                        if str(attribute["type"]) == "defaultNamingContext":
-                            base_dn = str(attribute["vals"][0])
-                            target_domain = sub(
-                                ",DC=",
-                                ".",
-                                base_dn[base_dn.lower().find("dc="):],
-                                flags=I,
-                            )[3:]
-                        if str(attribute["type"]) == "dnsHostName":
-                            target = str(attribute["vals"][0])
-                except Exception as e:
-                    self.logger.debug("Exception:", exc_info=True)
-                    self.logger.info(f"Skipping item, cannot process due to error {e}")
+            resp_parse = parse_result_attributes(resp)
+
+            target = None
+            target_domain = None
+            base_dn = None
+            try:
+                for attribute in resp_parse:
+                    base_dn = attribute.get("defaultNamingContext")
+                    if base_dn:
+                        base_dn = str(base_dn)
+                        target_domain = sub(r",DC=", ".", base_dn[base_dn.lower().find("dc="):], flags=I)[3:]
+
+                    target = attribute.get("dnsHostName")
+                    if target:
+                        target = str(target)
+            except Exception as e:
+                self.logger.debug("Exception:", exc_info=True)
+                self.logger.info(f"Skipping item, cannot process due to error {e}")
         except OSError:
             return False
         self.logger.debug(f"Target: {target}; target_domain: {target_domain}; base_dn: {base_dn}")
@@ -568,33 +565,33 @@ class ldap(connection):
         search_filter = "(userAccountControl:1.2.840.113556.1.4.803:=8192)"
         attributes = ["objectSid"]
         resp = self.search(search_filter, attributes, sizeLimit=0)
+        resp_parse = parse_result_attributes(resp)
         answers = []
         if resp and (self.password != "" or self.lmhash != "" or self.nthash != "") and self.username != "":
-            for attribute in resp[0][1]:
-                if str(attribute["type"]) == "objectSid":
-                    sid = self.sid_to_str(attribute["vals"][0])
-                    self.sid_domain = "-".join(sid.split("-")[:-1])
+
+            for item in resp_parse:
+                sid = item.get("objectSid").encode("latin1")
+                sid = self.sid_to_str(sid)
+                self.sid_domain = "-".join(sid.split("-")[:-1])
 
             # 2. get all group cn name
             search_filter = "(|(objectSid=" + self.sid_domain + "-512)(objectSid=" + self.sid_domain + "-544)(objectSid=" + self.sid_domain + "-519)(objectSid=S-1-5-32-549)(objectSid=S-1-5-32-551))"
             attributes = ["distinguishedName"]
             resp = self.search(search_filter, attributes, sizeLimit=0)
+            resp_parse = parse_result_attributes(resp)
             answers = []
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
-                for attribute in item["attributes"]:
-                    if str(attribute["type"]) == "distinguishedName":
-                        answers.append(str("(memberOf:1.2.840.113556.1.4.1941:=" + attribute["vals"][0] + ")"))
+
+            for item in resp_parse:
+                answers.append(str("(memberOf:1.2.840.113556.1.4.1941:=" + item.get("distinguishedName") + ")"))
 
             # 3. get member of these groups
             search_filter = "(&(objectCategory=user)(sAMAccountName=" + self.username + ")(|" + "".join(answers) + "))"
             attributes = [""]
             resp = self.search(search_filter, attributes, sizeLimit=0)
             answers = []
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
+            resp_parse = parse_result_attributes(resp)
+            
+            for item in resp_parse:
                 if item:
                     self.admin_privs = True
 
@@ -682,17 +679,14 @@ class ldap(connection):
         search_filter = "(objectCategory=group)"
         attributes = ["name"]
         resp = self.search(search_filter, attributes, 0)
+        resp_parse = parse_result_attributes(resp)
         if resp:
             self.logger.debug(f"Total of records returned {len(resp):d}")
 
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
+            for item in resp_parse:
                 name = ""
                 try:
-                    for attribute in item["attributes"]:
-                        if str(attribute["type"]) == "name":
-                            name = str(attribute["vals"][0])
+                    name = item.get("name")
                     self.logger.highlight(f"{name}")
                 except Exception as e:
                     self.logger.debug("Exception:", exc_info=True)
@@ -837,15 +831,14 @@ class ldap(connection):
             "lastLogon",
         ]
         resp = self.search(search_filter, attributes, 0)
+        resp_parse = parse_result_attributes(resp)
         if resp is None:
             self.logger.highlight("No entries found!")
         elif resp:
             answers = []
             self.logger.display(f"Total of records returned {len(resp):d}")
 
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
+            for item in resp_parse:
                 mustCommit = False
                 sAMAccountName = ""
                 memberOf = ""
@@ -853,18 +846,13 @@ class ldap(connection):
                 userAccountControl = 0
                 lastLogon = "N/A"
                 try:
-                    for attribute in item["attributes"]:
-                        if str(attribute["type"]) == "sAMAccountName":
-                            sAMAccountName = str(attribute["vals"][0])
-                            mustCommit = True
-                        elif str(attribute["type"]) == "userAccountControl":
-                            userAccountControl = "0x%x" % int(attribute["vals"][0])
-                        elif str(attribute["type"]) == "memberOf":
-                            memberOf = str(attribute["vals"][0])
-                        elif str(attribute["type"]) == "pwdLastSet":
-                            pwdLastSet = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                        elif str(attribute["type"]) == "lastLogon":
-                            lastLogon = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
+                    sAMAccountName = item.get("sAMAccountName", "")
+                    mustCommit = sAMAccountName is not None
+                    userAccountControl = "0x%x" % int(item.get("userAccountControl", 0))
+                    memberOf = str(item.get("memberOf", " "))
+                    pwdLastSet = "<never>" if str(item.get("pwdLastSet", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("pwdLastSet", 0))))))
+                    pwdLastSet = "<never>" if str(item.get("lastLogon", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("lastLogon", 0))))))
+
                     if mustCommit is True:
                         answers.append(
                             [
@@ -903,6 +891,7 @@ class ldap(connection):
             "lastLogon",
         ]
         resp = self.search(searchFilter, attributes, 0)
+        resp_parse = parse_result_attributes(resp)
         self.logger.debug(f"Search Filter: {searchFilter}")
         self.logger.debug(f"Attributes: {attributes}")
         self.logger.debug(f"Response: {resp}")
@@ -911,9 +900,7 @@ class ldap(connection):
         elif resp:
             answers = []
 
-            for item in resp:
-                if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                    continue
+            for item in resp_parse:
                 mustCommit = False
                 sAMAccountName = ""
                 memberOf = ""
@@ -923,24 +910,17 @@ class ldap(connection):
                 lastLogon = "N/A"
                 delegation = ""
                 try:
-                    for attribute in item["attributes"]:
-                        if str(attribute["type"]) == "sAMAccountName":
-                            sAMAccountName = str(attribute["vals"][0])
-                            mustCommit = True
-                        elif str(attribute["type"]) == "userAccountControl":
-                            userAccountControl = str(attribute["vals"][0])
-                            if int(userAccountControl) & UF_TRUSTED_FOR_DELEGATION:
-                                delegation = "unconstrained"
-                            elif int(userAccountControl) & UF_TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION:
-                                delegation = "constrained"
-                        elif str(attribute["type"]) == "memberOf":
-                            memberOf = str(attribute["vals"][0])
-                        elif str(attribute["type"]) == "pwdLastSet":
-                            pwdLastSet = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                        elif str(attribute["type"]) == "lastLogon":
-                            lastLogon = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                        elif str(attribute["type"]) == "servicePrincipalName":
-                            SPNs = [str(spn) for spn in attribute["vals"]]
+                    sAMAccountName = item.get("sAMAccountName", "")
+                    mustCommit = sAMAccountName is not None
+                    userAccountControl = int(item.get("userAccountControl", 0))
+                    memberOf = str(item.get("memberOf", " "))
+                    if userAccountControl & UF_TRUSTED_FOR_DELEGATION:
+                        delegation = "unconstrained"
+                    elif userAccountControl & UF_TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION:
+                        delegation = "constrained"
+                    pwdLastSet = "<never>" if str(item.get("pwdLastSet", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("pwdLastSet", 0))))))
+                    lastLogon = "<never>" if str(item.get("lastLogon", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("lastLogon", 0))))))
+                    SPNs = [str(spn) for spn in item.get("servicePrincipalName")]
 
                     if mustCommit is True:
                         if int(userAccountControl) & UF_ACCOUNTDISABLE:
@@ -1012,19 +992,21 @@ class ldap(connection):
         self.logger.debug(f"Querying LDAP server with filter: {search_filter} and attributes: {attributes}")
         try:
             resp = self.search(search_filter, attributes, 0)
+            resp_parse = parse_result_attributes(resp)
         except LDAPFilterSyntaxError as e:
             self.logger.fail(f"LDAP Filter Syntax Error: {e}")
             return
-        for item in resp:
-            if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                continue
-            self.logger.success(f"Response for object: {item['objectName']}")
-            for attribute in item["attributes"]:
-                attr = f"{attribute['type']}:"
-                vals = str(attribute["vals"]).replace("\n", "")
-                if "SetOf: " in vals:
-                    vals = vals.replace("SetOf: ", "")
-                self.logger.highlight(f"{attr:<20} {vals}")
+
+        for item in resp_parse:
+            self.logger.success(f"Response for object: {item.get('distinguishedName')}")
+            for attr, value in item.items():
+                if isinstance(value, list):
+                    self.logger.highlight(f"{attr:<20}: {' '.join(value)}")
+                elif isinstance(value, str) and not value.isprintable():
+                    # Convert non-printable strings to hex format
+                    self.logger.highlight(f"{attr:<20}: {value.encode('latin1').hex()}")
+                else:
+                    self.logger.highlight(f"{attr:<20}: {value}")
 
     def find_delegation(self):
         def printTable(items, header):
@@ -1138,13 +1120,12 @@ class ldap(connection):
             "lastLogon",
         ]
         resp = self.search(searchFilter, attributes, 0)
+        resp_parse = parse_result_attributes(resp)
 
         answers = []
         self.logger.debug(f"Total of records returned {len(resp):d}")
 
-        for item in resp:
-            if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                continue
+        for item in resp_parse:
             mustCommit = False
             sAMAccountName = ""
             memberOf = ""
@@ -1152,18 +1133,13 @@ class ldap(connection):
             userAccountControl = 0
             lastLogon = "N/A"
             try:
-                for attribute in item["attributes"]:
-                    if str(attribute["type"]) == "sAMAccountName":
-                        sAMAccountName = str(attribute["vals"][0])
-                        mustCommit = True
-                    elif str(attribute["type"]) == "userAccountControl":
-                        userAccountControl = "0x%x" % int(attribute["vals"][0])
-                    elif str(attribute["type"]) == "memberOf":
-                        memberOf = str(attribute["vals"][0])
-                    elif str(attribute["type"]) == "pwdLastSet":
-                        pwdLastSet = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                    elif str(attribute["type"]) == "lastLogon":
-                        lastLogon = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
+                sAMAccountName = item.get("sAMAccountName", "")
+                mustCommit = sAMAccountName is not None
+                userAccountControl = "0x%x" % int(item.get("userAccountControl", 0))
+                memberOf = str(item.get("memberOf", " "))
+                pwdLastSet = "<never>" if str(item.get("pwdLastSet", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("pwdLastSet", 0))))))
+                lastLogon = "<never>" if str(item.get("lastLogon", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("lastLogon", 0))))))
+
                 if mustCommit is True:
                     answers.append(
                         [
@@ -1211,32 +1187,21 @@ class ldap(connection):
                 return False
         answers = []
         self.logger.debug(f"Total of records returned {len(resp):d}")
+        resp_parse = parse_result_attributes(resp)
 
-        for item in resp:
-            if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                continue
-            mustCommit = False
-            sAMAccountName = ""
-            memberOf = ""
-            pwdLastSet = ""
-            userAccountControl = 0
+        for item in resp_parse:
             status = "enabled"
-            lastLogon = "N/A"
             try:
-                for attribute in item["attributes"]:
-                    if str(attribute["type"]) == "sAMAccountName":
-                        sAMAccountName = str(attribute["vals"][0])
-                        mustCommit = True
-                    elif str(attribute["type"]) == "userAccountControl":
-                        if int(attribute["vals"][0]) & 2:
-                            status = "disabled"
-                        userAccountControl = f"0x{int(attribute['vals'][0]):x}"
-                    elif str(attribute["type"]) == "memberOf":
-                        memberOf = str(attribute["vals"][0])
-                    elif str(attribute["type"]) == "pwdLastSet":
-                        pwdLastSet = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                    elif str(attribute["type"]) == "lastLogon":
-                        lastLogon = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
+                sAMAccountName = item.get("sAMAccountName", "")
+                mustCommit = sAMAccountName is not None
+                userAccountControl = int(item.get("userAccountControl", 0))
+                if userAccountControl & 2:
+                    status = "disabled"
+                userAccountControl = f"0x{int(item.get('userAccountControl', 0)):x}"
+                memberOf = str(item.get("memberOf", " "))
+                pwdLastSet = "<never>" if str(item.get("pwdLastSet", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("pwdLastSet", 0))))))
+                lastLogon = "<never>" if str(item.get("lastLogon", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("lastLogon", 0))))))
+
                 if mustCommit is True:
                     answers.append(
                         [
@@ -1269,31 +1234,19 @@ class ldap(connection):
             "lastLogon",
         ]
         resp = self.search(searchFilter, attributes, 0)
+        resp_parse = parse_result_attributes(resp)
         answers = []
         self.logger.debug(f"Total of records returned {len(resp):d}")
 
-        for item in resp:
-            if isinstance(item, ldapasn1_impacket.SearchResultEntry) is not True:
-                continue
-            mustCommit = False
-            sAMAccountName = ""
-            memberOf = ""
-            pwdLastSet = ""
-            userAccountControl = 0
-            lastLogon = "N/A"
-            try:
-                for attribute in item["attributes"]:
-                    if str(attribute["type"]) == "sAMAccountName":
-                        sAMAccountName = str(attribute["vals"][0])
-                        mustCommit = True
-                    elif str(attribute["type"]) == "userAccountControl":
-                        userAccountControl = "0x%x" % int(attribute["vals"][0])
-                    elif str(attribute["type"]) == "memberOf":
-                        memberOf = str(attribute["vals"][0])
-                    elif str(attribute["type"]) == "pwdLastSet":
-                        pwdLastSet = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
-                    elif str(attribute["type"]) == "lastLogon":
-                        lastLogon = "<never>" if str(attribute["vals"][0]) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(attribute["vals"][0])))))
+        for item in resp_parse:
+            try:    
+                sAMAccountName = item.get("sAMAccountName", "")
+                mustCommit = sAMAccountName is not None
+                userAccountControl = f"0x{int(item.get('userAccountControl', 0)):x}"
+                memberOf = str(item.get("memberOf", " "))
+                pwdLastSet = "<never>" if str(item.get("pwdLastSet", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("pwdLastSet", 0))))))
+                lastLogon = "<never>" if str(item.get("lastLogon", 0)) == "0" else str(datetime.fromtimestamp(self.getUnixTime(int(str(item.get("lastLogon", 0))))))
+
                 if mustCommit is True:
                     answers.append(
                         [
