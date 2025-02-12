@@ -419,6 +419,14 @@ class connection:
             else:
                 secret.append(password)
                 cred_type.append("plaintext")
+        
+        # Some libraries will be confused by a bare NT hash - pad such a hash
+        # with a placeholder LM: prefix.
+        def pad_lm(ntlm_hash):
+            if len(ntlm_hash) == 32:
+                lm_hash = "aad3b435b51404eeaad3b435b51404ee"
+                ntlm_hash = lm_hash + ":" + ntlm_hash
+            return ntlm_hash
 
         # Parse NTLM-hashes
         if hasattr(self.args, "hash") and self.args.hash:
@@ -431,6 +439,7 @@ class connection:
                                 self.logger.fail(f"Invalid NTLM hash length on line {(i + 1)} (len {len(line)}): {line}")
                                 continue
                             else:
+                                line = pad_lm(line)
                                 secret.append(line)
                                 cred_type.append("hash")
                 else:
@@ -438,6 +447,7 @@ class connection:
                         self.logger.fail(f"Invalid NTLM hash length {len(ntlm_hash)}, authentication not sent")
                         exit(1)
                     else:
+                        ntlm_hash = pad_lm(ntlm_hash)
                         secret.append(ntlm_hash)
                         cred_type.append("hash")
             self.logger.debug(secret)
