@@ -260,6 +260,16 @@ class ldap(connection):
 
         self.output_filename = os.path.expanduser(f"~/.nxc/logs/{self.hostname}_{self.host}".replace(":", "-"))
 
+        try:
+            self.db.add_host(
+                self.host,
+                self.hostname,
+                self.domain,
+                self.server_os
+            )
+        except Exception as e:
+            self.logger.debug(f"Error adding host {self.host} into db: {e!s}")
+
     def print_host_info(self):
         self.logger.debug("Printing host info for LDAP")
         self.logger.extra["protocol"] = "LDAP" if str(self.port) == "389" else "LDAPS"
@@ -312,6 +322,13 @@ class ldap(connection):
                 self.username = self.get_ldap_username()
 
             self.check_if_admin()
+
+            if password:
+                self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.password}")
+                self.db.add_credential("plaintext", domain, self.username, self.password)
+            elif ntlm_hash:
+                self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.hash}")
+                self.db.add_credential("hash", domain, self.username, self.hash)
 
             used_ccache = " from ccache" if useCache else f":{process_secret(kerb_pass)}"
             self.logger.success(f"{domain}\\{self.username}{used_ccache} {self.mark_pwned()}")
@@ -411,6 +428,8 @@ class ldap(connection):
             self.ldap_connection = ldap_impacket.LDAPConnection(url=ldap_url, baseDN=self.baseDN, dstIp=self.host)
             self.ldap_connection.login(self.username, self.password, self.domain, self.lmhash, self.nthash)
             self.check_if_admin()
+            self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.password}")
+            self.db.add_credential("plaintext", domain, self.username, self.password)
 
             # Prepare success credential text
             self.logger.success(f"{domain}\\{self.username}:{process_secret(self.password)} {self.mark_pwned()}")
@@ -432,6 +451,8 @@ class ldap(connection):
                     self.ldap_connection = ldap_impacket.LDAPConnection(url=ldaps_url, baseDN=self.baseDN, dstIp=self.host)
                     self.ldap_connection.login(self.username, self.password, self.domain, self.lmhash, self.nthash)
                     self.check_if_admin()
+                    self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.password}")
+                    self.db.add_credential("plaintext", domain, self.username, self.password)
 
                     # Prepare success credential text
                     self.logger.success(f"{domain}\\{self.username}:{process_secret(self.password)} {self.mark_pwned()}")
@@ -497,6 +518,8 @@ class ldap(connection):
             self.ldap_connection = ldap_impacket.LDAPConnection(url=ldaps_url, baseDN=self.baseDN, dstIp=self.host)
             self.ldap_connection.login(self.username, self.password, self.domain, self.lmhash, self.nthash)
             self.check_if_admin()
+            self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.hash}")
+            self.db.add_credential("hash", domain, self.username, self.hash)
 
             # Prepare success credential text
             out = f"{domain}\\{self.username}:{process_secret(self.nthash)} {self.mark_pwned()}"
@@ -518,6 +541,8 @@ class ldap(connection):
                     self.ldap_connection = ldap_impacket.LDAPConnection(url=ldaps_url, baseDN=self.baseDN, dstIp=self.host)
                     self.ldap_connection.login(self.username, self.password, self.domain, self.lmhash, self.nthash)
                     self.check_if_admin()
+                    self.logger.debug(f"Adding credential: {domain}/{self.username}:{self.hash}")
+                    self.db.add_credential("hash", domain, self.username, self.hash)
 
                     # Prepare success credential text
                     out = f"{domain}\\{self.username}:{process_secret(self.nthash)} {self.mark_pwned()}"
