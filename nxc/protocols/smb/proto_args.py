@@ -27,7 +27,7 @@ def proto_args(parser, parents):
     cred_gathering_group = smb_parser.add_argument_group("Credential Gathering", "Options for gathering credentials")
     cred_gathering_group.add_argument("--sam", action="store_true", help="dump SAM hashes from target systems")
     cred_gathering_group.add_argument("--lsa", action="store_true", help="dump LSA secrets from target systems")
-    cred_gathering_group.add_argument("--ntds", choices={"vss", "drsuapi"}, nargs="?", const="drsuapi", help="dump the NTDS.dit from target DCs using the specifed method")
+    cred_gathering_group.add_argument("--ntds", choices={"vss", "drsuapi","raw"}, nargs="?", const="drsuapi", help="dump the NTDS.dit from target DCs using the specifed method")
     cred_gathering_group.add_argument("--dpapi", choices={"cookies", "nosystem"}, nargs="*", help="dump DPAPI secrets from target systems, can dump cookies if you add 'cookies', will not dump SYSTEM dpapi if you add nosystem")
     cred_gathering_group.add_argument("--sccm", choices={"wmi", "disk"}, nargs="?", const="disk", help="dump SCCM secrets from target systems")
     cred_gathering_group.add_argument("--mkfile", action="store", help="DPAPI option. File with masterkeys in form of {GUID}:SHA1")
