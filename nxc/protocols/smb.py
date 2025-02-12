@@ -1539,12 +1539,29 @@ class smb(connection):
 
     def put_file_single(self, src, dst):
         self.logger.display(f"Copying {src} to {dst}")
-        with open(src, "rb") as file:
-            try:
+
+        try:
+            self.conn.getFile(self.args.share, dst, lambda data: None)
+            file_exists = True
+        except FileNotFoundError:
+            file_exists = False
+        except Exception as e:
+            self.logger.debug(f"Error checking if file exists on {self.args.share}: {e}")
+            file_exists = False
+
+        if file_exists:
+            ans = input(highlight(f"[!] {src} already exists on \\\\{self.args.share}\\{dst}. Do you want to overwrite it? [Y/n] ", "red"))
+            if ans.lower() not in ["y", "yes", ""]:
+                self.logger.fail(f"Uploading was not successful. The {src} exists on \\\\{self.args.share}\\{dst}")
+                return
+            self.logger.display(f"Trying to overwrite {src} on \\\\{self.args.share}\\{dst}...")
+
+        try:
+            with open(src, "rb") as file:
                 self.conn.putFile(self.args.share, dst, file.read)
-                self.logger.success(f"Created file {src} on \\\\{self.args.share}\\{dst}")
-            except Exception as e:
-                self.logger.fail(f"Error writing file to share {self.args.share}: {e}")
+            self.logger.success(f"Created file {src} on \\\\{self.args.share}\\{dst}")
+        except Exception as e:
+            self.logger.fail(f"Error writing file to share {self.args.share}: {e}")
 
     def put_file(self):
         for src, dest in self.args.put_file:

@@ -11,6 +11,7 @@ from nxc.logger import NXCAdapter
 from nxc.helpers.bloodhound import add_user_bh
 from nxc.helpers.ntlm_parser import parse_challenge
 from nxc.helpers.powershell import create_ps_command
+from nxc.helpers.logger import highlight
 from nxc.protocols.mssql.mssqlexec import MSSQLEXEC
 
 from impacket import tds, ntlm
@@ -353,19 +354,31 @@ class mssql(connection):
 
     @requires_admin
     def put_file(self):
-        self.logger.display(f"Copy {self.args.put_file[0]} to {self.args.put_file[1]}")
-        with open(self.args.put_file[0], "rb") as f:
-            try:
+        self.logger.display(f"Checking if {self.args.put_file[1]} exists on the remote machine.")
+        
+        # Check if the destination file exists before uploading
+        exec_method = MSSQLEXEC(self.conn, self.logger)
+        if exec_method.file_exists(self.args.put_file[1]):
+            ans = input(highlight(f"[!] {self.args.put_file[1]} already exists. Do you want to overwrite it? [Y/n] ", "red"))
+            if ans.lower() not in ["y", "yes", ""]:
+                self.logger.fail(f"Uploading was not successful. The file {self.args.put_file[1]} already exists.")
+                return False
+            self.logger.display(f"Trying to overwrite {self.args.put_file[1]}...")
+
+        self.logger.display(f"Copying {self.args.put_file[0]} to {self.args.put_file[1]}")
+        
+        try:
+            with open(self.args.put_file[0], "rb") as f:
                 data = f.read()
                 self.logger.display(f"Size is {len(data)} bytes")
-                exec_method = MSSQLEXEC(self.conn, self.logger)
                 exec_method.put_file(data, self.args.put_file[1])
+                
                 if exec_method.file_exists(self.args.put_file[1]):
                     self.logger.success("File has been uploaded on the remote machine")
                 else:
                     self.logger.fail("File does not exist on the remote system... error during upload")
-            except Exception as e:
-                self.logger.fail(f"Error during upload : {e}")
+        except Exception as e:
+            self.logger.fail(f"Error during upload: {e}")
 
     @requires_admin
     def get_file(self): 

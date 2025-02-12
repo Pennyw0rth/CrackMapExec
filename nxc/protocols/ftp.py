@@ -155,15 +155,34 @@ class ftp(connection):
 
     def put_file(self, local_file, remote_file):
         try:
+            # Check if the remote file already exists
+            self.conn.voidcmd("TYPE I")  # Switch to binary mode. necessary for size command.
+            if self.conn.size(remote_file) is not None:
+                ans = input(highlight(f"[!] {remote_file} already exists. Do you want to overwrite it? [Y/n] ", "red"))
+                if ans.lower() not in ["y", "yes", ""]:
+                    self.logger.fail(f"Uploading was not successful. The file {remote_file} already exists.")
+                    return False
+                self.logger.display(f"Trying to overwrite {remote_file}...")
+
+        except error_perm:
+            # If file does not exist, an error_perm will be raised, continue with upload
+            pass
+        except Exception as e:
+            self.logger.fail(f"Error checking if remote file exists: {e}")
+            return False
+
+        try:
             # Attempt to upload the file
-            self.conn.storbinary(f"STOR {remote_file}", open(local_file, "rb"))  # noqa: SIM115
+            with open(local_file, "rb") as file:
+                self.conn.storbinary(f"STOR {remote_file}", file)
         except error_perm as error_message:
             self.logger.fail(f"Failed to upload file. Response: ({error_message})")
             return False
         except FileNotFoundError:
             self.logger.fail(f"Failed to upload file. {local_file} does not exist locally.")
             return False
-        # Check if the file was uploaded
+
+        # Check if the file was uploaded successfully
         if self.conn.size(remote_file) > 0:
             self.logger.success(f"Uploaded: {local_file} to {remote_file}")
         else:
