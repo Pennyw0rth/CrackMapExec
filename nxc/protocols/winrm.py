@@ -2,16 +2,24 @@ import os
 import base64
 import requests
 import urllib3
+import tempfile
+import platform
 import logging
 import xml.etree.ElementTree as ET
 
 from io import StringIO
 from datetime import datetime
+from binascii import unhexlify
 from pypsrp.wsman import NAMESPACES
 from pypsrp.client import Client
 
+from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5 import constants
+from impacket.krb5.types import Principal
+from impacket.krb5.ccache import CCache
 from impacket.examples.secretsdump import LocalOperations, LSASecrets, SAMHashes
 
+from nxc.helpers.powershell import get_ps_script
 from nxc.config import process_secret
 from nxc.connection import connection
 from nxc.helpers.bloodhound import add_user_bh
@@ -131,6 +139,103 @@ class winrm(connection):
         wsman.enumerate("http://schemas.microsoft.com/wbem/wsman/1/windows/shell", enum_msg)
         self.admin_privs = True
         return True
+
+    # pypsrp not support nthash with kerberos auth, only support cleartext password with kerberos auth
+    # So, we can get a TGT when doing nthash with kerberos auth
+    def getTGT(self):
+        userName = Principal(self.username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+        tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(
+            clientName=userName,
+            password=self.password,
+            domain=self.domain,
+            lmhash=unhexlify(self.lmhash),
+            nthash=unhexlify(self.nthash),
+            aesKey=self.aesKey,
+            kdcHost=self.kdcHost
+        )
+        ccache = CCache()
+        ccache.fromTGT(tgt, oldSessionKey, sessionKey)
+        tgt_file = os.path.join(tempfile.gettempdir(), f"{self.username}@{self.domain}.ccache")
+        ccache.saveFile(tgt_file)
+        os.environ["KRB5CCNAME"] = tgt_file
+
+    # pypsrp is relate MIT kerberos toolkit, not like impacket
+    def kerberos_login(self, domain, username, password="", ntlm_hash="", aesKey="", kdcHost="", useCache=False):
+        if platform.system() != "Linux":
+            self.logger.fail("Doing kerberos auth with WINRM only support Linux platform!")
+            return False
+        self.admin_privs = False
+        lmhash = ""
+        nthash = ""
+        self.password = password
+        self.username = username
+        self.domain = domain
+        self.kdcHost = kdcHost
+        
+        # MIT krb5.conf prepare
+        with open(get_ps_script("winrm_krb5_config/krb5.conf")) as krb5_conf:
+            krb5_conf = krb5_conf.read()
+        krb5_conf = krb5_conf.replace("REPLACE_ME_DOMAIN_UPPER", self.domain.upper())
+        krb5_conf = krb5_conf.replace("REPLACE_ME_DOMAIN", self.domain)
+        krb5_conf_name = os.path.join(tempfile.gettempdir(), f"{self.domain}.conf")
+        with open(krb5_conf_name, "w") as krb5_conf_write:
+            krb5_conf_write.write(krb5_conf)
+        os.environ["KRB5_CONFIG"] = krb5_conf_name
+
+        if not password:
+            if ntlm_hash.find(":") != -1:
+                lmhash, nthash = ntlm_hash.split(":")
+            else:
+                nthash = ntlm_hash
+            self.nthash = nthash
+            self.lmhash = lmhash
+        
+        kerb_pass = next(s for s in [nthash, password, aesKey] if s) if not all(s == "" for s in [nthash, password, aesKey]) else ""
+        if useCache and not kerb_pass:
+            ccache = CCache.loadFile(os.getenv("KRB5CCNAME"))
+            username = ccache.credentials[0].header["client"].prettyPrint().decode().split("@")[0]
+            self.username = username
+        used_ccache = " from ccache" if useCache else f":{process_secret(kerb_pass)}"
+
+        for spn in ["HOST", "HTTP", "WSMAN"]:
+            # MIT kerberos not support nthash auth
+            try:
+                if not useCache and kerb_pass:
+                    self.getTGT()
+                self.conn = Client(
+                    self.host,
+                    port=self.port,
+                    auth="kerberos",
+                    username=f"{self.username}@{self.domain.upper()}",
+                    password="",
+                    ssl=self.ssl,
+                    cert_validation=False,
+                    negotiate_service=spn,
+                    negotiate_hostname_override=self.hostname,
+                )
+                self.check_if_admin()
+                self.logger.success(f"{self.domain}\\{self.username}{used_ccache} {self.mark_pwned()}")
+
+                if not self.args.local_auth:
+                    add_user_bh(self.username, self.domain, self.logger, self.config)
+                return True
+            except Exception as e:
+                if hasattr(e, "base_error"):
+                    self.logger.debug(f"Request service ticket with SPN: '{spn}/{self.hostname}' failed")
+                elif (hasattr(e, "err_code") and e.err_code == -1765328360) or (hasattr(e, "getErrorCode") and e.getErrorCode() == 24):
+                    error_msg = "(Password error!)"
+                    out = f"{self.domain}\\{self.username}{used_ccache} {error_msg}"
+                    self.logger.fail(out)
+                    return False
+                elif (hasattr(e, "err_code") and e.err_code == -1765328378) or (hasattr(e, "getErrorCode") and e.getErrorCode() == 6):
+                    error_msg = "(Username invalid! (not found in Kerberos database))"
+                    out = f"{self.domain}\\{self.username}{used_ccache} {error_msg}"
+                    self.logger.fail(out)
+                    return False
+                else:
+                    out = f"{self.domain}\\{self.username}{used_ccache} {e!s}"
+                    self.logger.fail(out)
+                    return False
 
     def plaintext_login(self, domain, username, password):
         self.admin_privs = False
