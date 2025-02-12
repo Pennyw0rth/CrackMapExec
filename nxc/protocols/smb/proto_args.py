@@ -67,9 +67,11 @@ def proto_args(parser, parents):
     segroup.add_argument("--pattern", nargs="+", help="pattern(s) to search for in folders, filenames and file content")
     segroup.add_argument("--regex", nargs="+", help="regex(s) to search for in folders, filenames and file content")
 
-    files_group = smb_parser.add_argument_group("Files", "Options for remote file interaction")
+    files_group = smb_parser.add_argument_group("Files", "Options for put and get remote files")
     files_group.add_argument("--put-file", action="append", nargs=2, metavar="FILE", help="Put a local file into remote target, ex: whoami.txt \\\\Windows\\\\Temp\\\\whoami.txt")
     files_group.add_argument("--get-file", action="append", nargs=2, metavar="FILE", help="Get a remote file, ex: \\\\Windows\\\\Temp\\\\whoami.txt whoami.txt")
+    files_group.add_argument("--get-folder", action="append", nargs=2, metavar="DIR", help="Get a remote directory, ex: \\\\Windows\\\\Temp\\\\testing testing")
+    files_group.add_argument("--recursive", default=False, action="store_true", help="Recursively get a folder")
     files_group.add_argument("--append-host", action="store_true", help="append the host to the get-file filename")
 
     cmd_exec_group = smb_parser.add_argument_group("Command Execution", "Options for executing commands")
