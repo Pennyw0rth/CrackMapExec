@@ -7,6 +7,7 @@ from nxc.paths import TMP_PATH
 from nxc.protocols.smb.remotefile import RemoteFile
 from impacket.smb3structs import FILE_READ_DATA
 from impacket.smbconnection import SessionError
+from impacket.nmb import NetBIOSTimeout
 
 
 CHUNK_SIZE = 4096
@@ -51,17 +52,7 @@ def get_list_from_option(opt):
 
 
 class SMBSpiderPlus:
-    def __init__(
-        self,
-        smb,
-        logger,
-        download_flag,
-        stats_flag,
-        exclude_exts,
-        exclude_filter,
-        max_file_size,
-        output_folder,
-    ):
+    def __init__(self, smb, logger, download_flag, stats_flag, exclude_exts, exclude_filter, max_file_size, output_folder):
         self.smb = smb
         self.host = self.smb.conn.getRemoteHost()
         self.max_connection_attempts = 5
@@ -83,6 +74,7 @@ class SMBSpiderPlus:
             "num_files_unmodified": 0,
             "num_files_updated": 0,
         }
+        self.connection_attempts = 1  # we connect once initially
         self.download_flag = download_flag
         self.stats_flag = stats_flag
         self.exclude_filter = exclude_filter
@@ -97,15 +89,14 @@ class SMBSpiderPlus:
         """Performs a series of reconnection attempts, up to `self.max_connection_attempts`, with a 3-second delay between each attempt.
         It renegotiates the session by creating a new connection object and logging in again.
         """
-        for i in range(1, self.max_connection_attempts + 1):
+        for i in range(self.connection_attempts, self.max_connection_attempts + 1):
             self.logger.display(f"Reconnection attempt #{i}/{self.max_connection_attempts} to server.")
-
-            # Renegotiate the session
             time.sleep(3)
+            self.logger.display("Creating new connection object and trying to login...")
             self.smb.create_conn_obj()
             self.smb.login()
+            self.connection_attempts += 1
             return True
-
         return False
 
     def list_path(self, share, subfolder):
@@ -113,21 +104,18 @@ class SMBSpiderPlus:
         filelist = []
         try:
             # Get file list for the current folder
-            filelist = self.smb.conn.listPath(share, subfolder + "*")
-
+            filelist = self.smb.conn.listPath(share, f"{subfolder}*")
         except SessionError as e:
-            self.logger.debug(f'Failed listing files on share "{share}" in folder "{subfolder}".')
-            self.logger.debug(str(e))
-
+            self.logger.debug(f"Failed listing files on share '{share}'' in folder '{subfolder}': {e}")
             if "STATUS_ACCESS_DENIED" in str(e):
-                self.logger.debug(f'Cannot list files in folder "{subfolder}".')
-
+                self.logger.debug(f'Cannot list files in folder "{subfolder}"')
             elif "STATUS_OBJECT_PATH_NOT_FOUND" in str(e):
-                self.logger.debug(f"The folder {subfolder} does not exist.")
-
+                self.logger.debug(f"The folder {subfolder} does not exist")
             elif self.reconnect():
                 filelist = self.list_path(share, subfolder)
-
+        except NetBIOSTimeout:
+            self.logger.debug("Received a NetBIOSTimeout, moving on....")
+            return []
         return filelist
 
     def get_remote_file(self, share, path):
@@ -245,6 +233,7 @@ class SMBSpiderPlus:
         # - It's a file then we apply the checks
         for result in filelist:
             next_filedir = result.get_longname()
+            # "ServiceProfiles", "assembly", "Boot", "CbsTemp", "Fonts", "Installer", "Microsoft.NET"
             if next_filedir in [".", ".."]:
                 continue
             next_fullpath = folder + next_filedir
